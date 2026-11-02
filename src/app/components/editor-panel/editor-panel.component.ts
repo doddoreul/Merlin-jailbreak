@@ -139,7 +139,7 @@ export class EditorPanelComponent {
   }
 
   startEditingTitle(): void {
-    if (this.isRoot) {
+    if (this.isRoot || this.isRecentAdditionsFolder(this.selectedItem)) {
       return;
     }
 
@@ -180,7 +180,7 @@ export class EditorPanelComponent {
   async onDelete(): Promise<void> {
     const item = this.selectedItem;
 
-    if (!item || item.type === PlaylistItemType.Root) {
+    if (!item || item.type === PlaylistItemType.Root || this.isRecentAdditionsFolder(item)) {
       return;
     }
 
@@ -267,6 +267,11 @@ export class EditorPanelComponent {
 
         this.playlistService.updateItemAssetPaths(song.id, assetUpdates);
       });
+
+      const updatedSongs = createdSongs
+        .map(song => this.playlistService.items().find(item => item.id === song.id))
+        .filter((item): item is PlaylistItem => !!item);
+      this.playlistService.addSongsToRecentAdditions(updatedSongs);
     } catch (error) {
       console.error('Error importing audio into workspace:', error);
       await message(this.getImportDirectoryErrorMessage(error), {
@@ -367,6 +372,11 @@ export class EditorPanelComponent {
 
             this.playlistService.updateItemAssetPaths(song.id, assetUpdates);
           });
+
+          const updatedSongs = createdSongs
+            .map(song => this.playlistService.items().find(item => item.id === song.id))
+            .filter((item): item is PlaylistItem => !!item);
+          this.playlistService.addSongsToRecentAdditions(updatedSongs);
 
           report.push({ label: createdSongs[0]?.title || resolved.title || url, success: true });
         } catch (error) {
@@ -556,6 +566,10 @@ export class EditorPanelComponent {
 
   isAudioChild(child: PlaylistItem): boolean {
     return child.type === PlaylistItemType.Song || child.type === PlaylistItemType.SongWithImage;
+  }
+
+  isRecentAdditionsFolder(item: PlaylistItem | null | undefined): boolean {
+    return this.playlistService.isRecentAdditionsFolder(item);
   }
 
   isChildMissingThumbnail(child: PlaylistItem): boolean {

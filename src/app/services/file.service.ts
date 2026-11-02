@@ -192,6 +192,7 @@ export class FileService {
 
       await this.loadWorkspacePlaylist(result);
       await this.handleMissingImportedAssets();
+      await this.promptClearRecentAdditions();
     } catch (error) {
       console.error('Error opening playlist directory:', error);
       await message(
@@ -222,6 +223,7 @@ export class FileService {
       const buffer = new Uint8Array(readResult.data).buffer;
       this.playlistService.loadPlaylist(buffer, playlistPath, result.base_path, result.root);
       await this.handleMissingImportedAssets();
+      await this.promptClearRecentAdditions();
     } catch (error) {
       console.error('Error reopening workspace:', error);
     } finally {
@@ -691,6 +693,26 @@ export class FileService {
     missingAssets
       .filter(asset => asset.missingKinds.includes('vignette'))
       .forEach(asset => this.playlistService.updateItemAssetPaths(asset.itemId, { imagepath: '' }));
+  }
+
+  private async promptClearRecentAdditions(): Promise<void> {
+    if (!this.playlistService.hasRecentAdditions()) {
+      return;
+    }
+
+    const shouldClear = await confirm(
+      'Souhaitez-vous vider la playlist "Derniers ajouts" ?',
+      {
+        title: 'Derniers ajouts',
+        kind: 'warning',
+        okLabel: 'Vider',
+        cancelLabel: 'Conserver'
+      }
+    );
+
+    if (shouldClear) {
+      this.playlistService.clearRecentAdditions();
+    }
   }
 
   private isMountedVolumeRoot(path: string): boolean {

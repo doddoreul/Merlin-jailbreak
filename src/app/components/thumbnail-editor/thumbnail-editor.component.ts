@@ -18,6 +18,7 @@ export class ThumbnailEditorComponent {
   @Input() itemId: number = 0;
   @Input() compact = false;
   @Input() hideEditAction = false;
+  @Input() disabled = false;
   @Input() alt = 'Thumbnail';
   @Output() imageChanged = new EventEmitter<string>();
 
@@ -61,6 +62,9 @@ export class ThumbnailEditorComponent {
   }
 
   async onSelectImage(): Promise<void> {
+    if (this.disabled) {
+      return;
+    }
     try {
       this.isLoading.set(true);
       const imagePath = await this.fileService.selectImage();
@@ -98,7 +102,7 @@ export class ThumbnailEditorComponent {
   }
 
   async onPreviewClick(): Promise<void> {
-    if (!this.compact) {
+    if (this.disabled || !this.compact) {
       return;
     }
 
@@ -121,6 +125,10 @@ export class ThumbnailEditorComponent {
     event.preventDefault();
     event.stopPropagation();
     this.isDragOver.set(false);
+
+    if (this.disabled) {
+      return;
+    }
 
     // In Tauri, we would need to handle file drops differently
     // For now, just open the file dialog

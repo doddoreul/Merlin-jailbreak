@@ -11,6 +11,7 @@ interface SongDraft {
 })
 export class PlaylistService {
   private static readonly LOG_PREFIX = '[playlist]';
+  private static readonly RECENT_ADDITIONS_TITLE = 'Derniers ajouts';
   private static readonly HEADER_SIZE = 20;
   private static readonly UUID_MAX_BYTES = 64;
   private static readonly TITLE_MAX_BYTES = 66;
@@ -426,7 +427,7 @@ export class PlaylistService {
     this.state.update(s => {
       const itemToUpdate = s.items.find(item => item.id === itemId);
 
-      if (!itemToUpdate || itemToUpdate.type === PlaylistItemType.Root) {
+      if (!itemToUpdate || itemToUpdate.type === PlaylistItemType.Root || this.isRecentAdditionsFolder(itemToUpdate)) {
         return s;
       }
 
@@ -461,7 +462,7 @@ export class PlaylistService {
   updateItemImage(itemId: number, imagePath: string): void {
     this.state.update(s => {
       const itemToUpdate = s.items.find(item => item.id === itemId);
-      if (!itemToUpdate) {
+      if (!itemToUpdate || this.isRecentAdditionsFolder(itemToUpdate)) {
         return s;
       }
 
@@ -704,7 +705,7 @@ export class PlaylistService {
 
     this.state.update(s => {
       const itemToDelete = s.items.find(i => i.id === itemId);
-      if (!itemToDelete || itemToDelete.type === PlaylistItemType.Root) return s;
+      if (!itemToDelete || itemToDelete.type === PlaylistItemType.Root || this.isRecentAdditionsFolder(itemToDelete)) return s;
 
       const fallbackSelectedItem = s.items.find(item => item.id === itemToDelete.parent_id) ?? null;
 
@@ -757,6 +758,123 @@ export class PlaylistService {
   /**
    * Get flattened items list for export
    */
+  isRecentAdditionsFolder(item: PlaylistItem | null | undefined): boolean {
+    return !!item
+      && item.type !== PlaylistItemType.Root
+      && item.title === PlaylistService.RECENT_ADDITIONS_TITLE
+      && (item.type === PlaylistItemType.Folder || item.type === PlaylistItemType.Favorite);
+  }
+
+  getRecentAdditionsFolder(): PlaylistItem | null {
+    return this.items().find(item => this.isRecentAdditionsFolder(item)) ?? null;
+  }
+
+  hasRecentAdditions(): boolean {
+    return this.getRecentAdditionsFolder() !== null;
+  }
+
+  ensureRecentAdditionsFolder(): number {
+    const existing = this.getRecentAdditionsFolder();
+    if (existing) {
+      return existing.id;
+    }
+
+    this.createFolder(1, PlaylistService.RECENT_ADDITIONS_TITLE);
+    return this.getRecentAdditionsFolder()?.id ?? 0;
+  }
+
+  addSongsToRecentAdditions(songs: PlaylistItem[]): void {
+    if (songs.length === 0) {
+      return;
+    }
+
+    const recentId = this.ensureRecentAdditionsFolder();
+    if (!recentId) {
+      return;
+    }
+
+    this.state.update(s => {
+      const recentFolder = s.items.find(item => item.id === recentId);
+      if (!recentFolder) {
+        return s;
+      }
+
+      const recentSongs = s.items.filter(item => item.parent_id === recentId);
+      const existingSoundpaths = new Set(recentSongs.map(item => item.soundpath).filter(path => path.trim().length > 0));
+      const maxId = Math.max(...s.items.map(item => item.id), 0);
+      const nextOrder = recentSongs.length > 0 ? Math.max(...recentSongs.map(item => item.order)) + 1 : 0;
+
+      const newItems: PlaylistItem[] = [];
+      let offset = 0;
+      const now = Math.floor(Date.now() / 1000);
+
+      for (const song of songs) {
+        if (!song.soundpath || existingSoundpaths.has(song.soundpath)) {
+          continue;
+        }
+
+        newItems.push({
+          ...song,
+          id: maxId + offset + 1,
+          parent_id: recentId,
+          order: nextOrder + offset,
+          uuid: crypto.randomUUID(),
+          add_time: now,
+          nb_children: 0,
+          children: [],
+          expanded: false,
+          selected: false
+        });
+        existingSoundpaths.add(song.soundpath);
+        offset += 1;
+      }
+
+      if (newItems.length === 0) {
+        return s;
+      }
+
+      const items = s.items.map(item =>
+        item.id === recentId
+          ? { ...item, nb_children: item.nb_children + newItems.length, expanded: true }
+          : item
+      );
+      items.push(...newItems);
+
+      const hierarchy = this.buildHierarchy(items);
+
+      return {
+        ...s,
+        items,
+        hierarchy,
+        isDirty: true,
+        selectedItem: s.selectedItem
+      };
+    });
+  }
+
+  clearRecentAdditions(): void {
+    const recentId = this.getRecentAdditionsFolder()?.id;
+    if (!recentId) {
+      return;
+    }
+
+    this.state.update(s => {
+      const items = s.items
+        .filter(item => item.parent_id !== recentId)
+        .map(item => item.id === recentId ? { ...item, nb_children: 0 } : item);
+
+      const hierarchy = this.buildHierarchy(items);
+
+      return {
+        ...s,
+        items,
+        hierarchy,
+        isDirty: true,
+        selectedItem: this.resolveSelectedItem(hierarchy, s.selectedItem)
+      };
+    });
+  }
+
   getFlattenedItems(): PlaylistItem[] {
     return this.prepareItemsForExport(this.state().items);
   }
