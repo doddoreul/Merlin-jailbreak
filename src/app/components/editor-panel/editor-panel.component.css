@@ -333,3 +333,18 @@
   border-radius: var(--radius-full);
   color: rgba(var(--front-app-rgb), 0.45);
 }
+
+.youtube-modal-backdrop{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.45);padding:var(--spacing-md)}
+.youtube-modal{width:min(100%,32rem);background:var(--color-surface,#fff);border-radius:var(--radius-lg,.75rem);box-shadow:0 20px 45px rgba(15,23,42,.25);overflow:hidden}
+.youtube-modal-header,.youtube-modal-footer{display:flex;align-items:center;justify-content:space-between;gap:var(--spacing-sm);padding:var(--spacing-md)}
+.youtube-modal-header h3{margin:0;font-size:1.1rem}
+.youtube-modal-body{padding:0 var(--spacing-md) var(--spacing-md);display:flex;flex-direction:column;gap:var(--spacing-sm)}
+.youtube-url-input{width:100%}
+.youtube-loading{margin:0;font-size:.9rem;opacity:.8}
+.youtube-modal-footer{justify-content:flex-end;border-top:1px solid rgba(15,23,42,.08)}
+.youtube-url-textarea{min-height:7rem;resize:vertical}
+.youtube-report{display:flex;flex-direction:column;gap:.35rem;max-height:12rem;overflow:auto}
+.youtube-report-row{display:flex;gap:.5rem;align-items:baseline}
+.youtube-report-status{font-weight:700}
+.youtube-report-row.is-success .youtube-report-status{color:#15803d}
+.youtube-report-row.is-error .youtube-report-status{color:#b91c1c}

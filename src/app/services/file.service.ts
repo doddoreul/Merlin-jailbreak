@@ -393,6 +393,15 @@ export class FileService {
     }
   }
 
+  async fetchYoutube(url: string): Promise<AudioImportCandidate> {
+    try {
+      return await invoke<AudioImportCandidate>('fetch_youtube', { url });
+    } catch (error) {
+      console.error('Error fetching YouTube audio:', error);
+      throw error;
+    }
+  }
+
   async importAudioToWorkspace(filePaths: string[], targetPaths: string[]): Promise<Array<{ sourcePath: string; workspacePath: string }>> {
     const imported: Array<{ sourcePath: string; workspacePath: string }> = [];
 

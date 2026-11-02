@@ -284,6 +284,13 @@
           </svg>
           <span>Importer des MP3</span>
         </button>
+        <button class="btn btn-ghost" (click)="openYoutubeModal()" title="Importer depuis YouTube" [disabled]="youtubeLoading()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 2-1.7h15a2 2 0 0 1 2 1.7 24.12 24.12 0 0 1 0 10 2 2 0 0 1-2 1.7h-15a2 2 0 0 1-2-1.7Z"/>
+            <path d="m10 15 5-3-5-3z"/>
+          </svg>
+          <span>Importer depuis YouTube</span>
+        </button>
       </div>
     }
   } @else {
@@ -300,4 +307,59 @@
       <p class="empty-hint">Cliquez sur un élément dans la liste pour voir ses détails</p>
     </div>
   }
+
 </div>
+
+@if (youtubeModalOpen()) {
+  <div class="youtube-modal-backdrop" (click)="!youtubeLoading() && closeYoutubeModal()">
+    <div class="youtube-modal" (click)="$event.stopPropagation()">
+      <div class="youtube-modal-header">
+        <h3>Importer depuis YouTube</h3>
+        <button class="btn btn-ghost btn-icon btn-sm" (click)="closeYoutubeModal()" [disabled]="youtubeLoading()" title="Fermer">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="youtube-modal-body">
+        <label class="section-label" for="youtube-url-input">URLs YouTube</label>
+        <textarea
+          id="youtube-url-input"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="none"
+          spellcheck="false"
+          class="title-input youtube-url-input youtube-url-textarea"
+          [(ngModel)]="youtubeUrlInput"
+          [disabled]="youtubeLoading()"
+          placeholder="https://www.youtube.com/watch?v=...
+https://www.youtube.com/watch?v=..."
+        ></textarea>
+        @if (youtubeLoading()) {
+          <p class="youtube-loading">Téléchargement en cours...</p>
+        }
+        @if (youtubeReport().length > 0) {
+          <div class="youtube-report">
+            @for (entry of youtubeReport(); track $index) {
+              <div class="youtube-report-row" [class.is-success]="entry.success" [class.is-error]="!entry.success">
+                <span class="youtube-report-status">{{ entry.success ? 'V' : 'X' }}</span>
+                <span class="youtube-report-label">{{ entry.label }}</span>
+              </div>
+            }
+          </div>
+        }
+      </div>
+      <div class="youtube-modal-footer">
+        <button class="btn btn-ghost" (click)="closeYoutubeModal()" [disabled]="youtubeLoading()">Annuler</button>
+        <button
+          class="btn btn-primary"
+          (click)="youtubeReport().length > 0 ? closeYoutubeModal() : confirmYoutubeImport()"
+          [disabled]="youtubeLoading() || (youtubeReport().length === 0 && !youtubeUrlInput.trim())"
+        >
+          {{ youtubeReport().length > 0 ? 'Fini' : 'Importer' }}
+        </button>
+      </div>
+    </div>
+  </div>
+}

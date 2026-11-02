@@ -40,6 +40,11 @@ export class EditorPanelComponent {
   editingChildId = signal<number | null>(null);
   childTitleValue = '';
 
+  youtubeModalOpen = signal(false);
+  youtubeLoading = signal(false);
+  youtubeUrlInput = '';
+  youtubeReport = signal<Array<{ label: string; success: boolean }>>([]);
+
   constructor() {
     effect(() => {
       const item = this.selectedItem;
@@ -268,6 +273,111 @@ export class EditorPanelComponent {
         title: 'Erreur d’import',
         kind: 'error'
       });
+    }
+  }
+
+  openYoutubeModal(): void {
+    if (!this.isContainer) {
+      return;
+    }
+
+    this.youtubeUrlInput = '';
+    this.youtubeReport.set([]);
+    this.youtubeModalOpen.set(true);
+  }
+
+  closeYoutubeModal(): void {
+    if (this.youtubeLoading()) {
+      return;
+    }
+
+    this.youtubeModalOpen.set(false);
+    this.youtubeUrlInput = '';
+    this.youtubeReport.set([]);
+  }
+
+  async confirmYoutubeImport(): Promise<void> {
+    const parent = this.selectedItem;
+    const urls = this.youtubeUrlInput
+      .split(/\r?\n/)
+      .map(url => url.trim())
+      .filter(url => url.length > 0);
+
+    if (!parent || !this.isContainer || urls.length === 0 || this.youtubeLoading()) {
+      return;
+    }
+
+    this.youtubeLoading.set(true);
+    const report: Array<{ label: string; success: boolean }> = [];
+
+    try {
+      for (const url of urls) {
+        try {
+          const candidate = await this.fileService.fetchYoutube(url);
+          const resolved: ResolvedAudioImportCandidate = {
+            sourcePath: candidate.source_path,
+            title: candidate.title,
+            imageSourcePath: candidate.image_source_path,
+            imageData: candidate.image_data
+          };
+
+          const createdSongs = this.playlistService.createSongs(
+            parent.id,
+            [{ sourcePath: resolved.sourcePath, title: resolved.title }]
+          );
+
+          if (createdSongs.length === 0) {
+            report.push({ label: resolved.title || url, success: false });
+            continue;
+          }
+
+          const importedFiles = await this.fileService.importAudioToWorkspace(
+            [resolved.sourcePath],
+            createdSongs.map(song => song.soundpath)
+          );
+          const sourceToWorkspace = new Map(importedFiles.map(file => [file.sourcePath, file.workspacePath]));
+          const imageEntries: Array<{ itemId: number; sourcePath?: string; data?: number[] }> = [];
+
+          if (resolved.imageSourcePath) {
+            imageEntries.push({ itemId: createdSongs[0].id, sourcePath: resolved.imageSourcePath });
+          } else if (resolved.imageData) {
+            imageEntries.push({ itemId: createdSongs[0].id, data: resolved.imageData });
+          }
+
+          const imageImports = await this.fileService.importImagesToWorkspace(imageEntries);
+          const songIdToImagePath = new Map(imageImports.map(file => [file.itemId, file.workspacePath]));
+
+          createdSongs.forEach(song => {
+            const workspacePath = sourceToWorkspace.get(resolved.sourcePath);
+            const imageWorkspacePath = songIdToImagePath.get(song.id);
+
+            if (!workspacePath && !imageWorkspacePath) {
+              return;
+            }
+
+            const assetUpdates: { soundpath?: string; imagepath?: string } = {};
+
+            if (workspacePath) {
+              assetUpdates.soundpath = workspacePath;
+            }
+
+            if (imageWorkspacePath) {
+              assetUpdates.imagepath = imageWorkspacePath;
+            }
+
+            this.playlistService.updateItemAssetPaths(song.id, assetUpdates);
+          });
+
+          report.push({ label: createdSongs[0]?.title || resolved.title || url, success: true });
+        } catch (error) {
+          console.error('Error importing YouTube audio into workspace:', error);
+          report.push({ label: url, success: false });
+        }
+      }
+
+      this.youtubeReport.set(report);
+    } finally {
+      this.youtubeLoading.set(false);
     }
   }
 

@@ -11,6 +11,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 #[cfg(windows)]
 use windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 fn should_skip_dir(path: &Path) -> bool {
     path.file_name()
@@ -1242,6 +1244,208 @@ fn write_asset_file(path: &str, data: Vec<u8>) -> Result<(), String> {
         .map_err(|e| format!("Failed to write asset: {}", e))
 }
 
+fn extract_youtube_id(url: &str) -> Option<String> {
+    let url = url.trim();
+
+    let mut candidate: Option<String> = None;
+
+    if let Some(pos) = url.find("v=") {
+        let rest = &url[pos + 2..];
+        let id = rest
+            .split(|c: char| c == '&' || c == '#' || c == '?' || c.is_whitespace())
+            .next()
+            .unwrap_or("");
+        if is_valid_youtube_id(id) {
+            candidate = Some(id.to_string());
+        }
+    }
+
+    if candidate.is_none() {
+        for marker in ["youtu.be/", "youtube.com/shorts/", "youtube.com/embed/", "youtube-nocookie.com/embed/"] {
+            if let Some(pos) = url.find(marker) {
+                let rest = &url[pos + marker.len()..];
+                let id = rest
+                    .split(|c: char| c == '?' || c == '#' || c == '/' || c.is_whitespace())
+                    .next()
+                    .unwrap_or("");
+                if is_valid_youtube_id(id) {
+                    candidate = Some(id.to_string());
+                    break;
+                }
+            }
+        }
+    }
+
+    candidate
+}
+
+fn is_valid_youtube_id(value: &str) -> bool {
+    value.len() == 11
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn yt_dlp_program() -> &'static str {
+    "yt-dlp"
+}
+
+fn find_first_file_with_extension(dir: &Path, extension: &str) -> Option<PathBuf> {
+    fs::read_dir(dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            lowercase_extension(path)
+                .as_deref()
+                .map(|ext| ext == extension)
+                .unwrap_or(false)
+        })
+}
+
+fn normalize_youtube_title(title: &str) -> String {
+    title
+        .chars()
+        .map(|c| match c {
+            'à' | 'á' | 'â' | 'ä' | 'ã' | 'å' | 'ā' => 'a',
+            'À' | 'Á' | 'Â' | 'Ä' | 'Ã' | 'Å' | 'Ā' => 'A',
+            'è' | 'é' | 'ê' | 'ë' | 'ē' => 'e',
+            'È' | 'É' | 'Ê' | 'Ë' | 'Ē' => 'E',
+            'ì' | 'í' | 'î' | 'ï' | 'ī' => 'i',
+            'Ì' | 'Í' | 'Î' | 'Ï' | 'Ī' => 'I',
+            'ò' | 'ó' | 'ô' | 'ö' | 'õ' | 'ō' => 'o',
+            'Ò' | 'Ó' | 'Ô' | 'Ö' | 'Õ' | 'Ō' => 'O',
+            'ù' | 'ú' | 'û' | 'ü' | 'ū' => 'u',
+            'Ù' | 'Ú' | 'Û' | 'Ü' | 'Ū' => 'U',
+            'ç' => 'c',
+            'Ç' => 'C',
+            'ñ' => 'n',
+            'Ñ' => 'N',
+            'ÿ' => 'y',
+            'Ÿ' => 'Y',
+            _ => c,
+        })
+        .collect()
+}
+
+fn perform_fetch_youtube(url: &str) -> Result<AudioImportCandidate, String> {
+    let video_id = extract_youtube_id(url)
+        .ok_or_else(|| "URL YouTube invalide : identifiant vidéo introuvable.".to_string())?;
+
+    let yt_dlp = yt_dlp_program();
+
+    let yt_dlp_check = std::process::Command::new(yt_dlp)
+        .creation_flags(0x08000000)
+        .arg("--version")
+        .output()
+        .map_err(|_| {
+            "yt-dlp est introuvable dans le PATH. Installez yt-dlp puis réessayez.".to_string()
+        })?;
+    if !yt_dlp_check.status.success() {
+        return Err("yt-dlp est introuvable dans le PATH. Installez yt-dlp puis réessayez.".to_string());
+    }
+
+    let ffmpeg_check = std::process::Command::new("ffmpeg")
+        .creation_flags(0x08000000)
+        .arg("-version")
+        .output()
+        .map_err(|_| {
+            "ffmpeg est introuvable dans le PATH. Installez ffmpeg puis réessayez.".to_string()
+        })?;
+    if !ffmpeg_check.status.success() {
+        return Err("ffmpeg est introuvable dans le PATH. Installez ffmpeg puis réessayez.".to_string());
+    }
+
+    let temp_root = std::env::temp_dir().join("youtube_import").join(&video_id);
+    clear_path(&temp_root)?;
+    ensure_dir(&temp_root)?;
+
+    let title_output = std::process::Command::new(yt_dlp)
+        .creation_flags(0x08000000)
+        .args([
+            "--no-warnings",
+            "--no-progress",
+            "--no-playlist",
+            "--extractor-args",
+            "youtube:player_client=web,android,ios",
+            "--skip-download",
+            "--print",
+            "title",
+            url,
+        ])
+        .output()
+        .map_err(|e| format!("Impossible de lancer yt-dlp : {}", e))?;
+
+    if !title_output.status.success() {
+        let stderr = String::from_utf8_lossy(&title_output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Le téléchargement YouTube a échoué.".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    let title = String::from_utf8_lossy(&title_output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .last()
+        .unwrap_or(&video_id)
+        .to_string();
+    let title = normalize_youtube_title(&title);
+
+    let output_template = temp_root.join("%(id)s.%(ext)s");
+    let download_status = std::process::Command::new(yt_dlp)
+        .creation_flags(0x08000000)
+        .args([
+            "--no-warnings",
+            "--no-progress",
+            "--no-playlist",
+            "--extractor-args",
+            "youtube:player_client=web,android,ios",
+            "--extract-audio",
+            "--audio-format",
+            "mp3",
+            "--audio-quality",
+            "128K",
+            "--write-thumbnail",
+            "--convert-thumbnails",
+            "jpg",
+            "--output",
+        ])
+        .arg(&output_template)
+        .arg(url)
+        .status()
+        .map_err(|e| format!("Impossible de lancer yt-dlp : {}", e))?;
+
+    if !download_status.success() {
+        return Err("Le téléchargement YouTube a échoué.".to_string());
+    }
+
+    let mp3_path = find_first_file_with_extension(&temp_root, "mp3")
+        .ok_or_else(|| "yt-dlp n'a pas produit de fichier MP3.".to_string())?;
+    let image_path = find_first_file_with_extension(&temp_root, "jpg")
+        .or_else(|| find_first_file_with_extension(&temp_root, "jpeg"));
+
+    let image_data = image_path
+        .as_ref()
+        .and_then(|path| fs::read(path).ok());
+
+    Ok(AudioImportCandidate {
+        source_path: mp3_path.to_string_lossy().to_string(),
+        title,
+        image_source_path: image_path.map(|path| path.to_string_lossy().to_string()),
+        image_data,
+    })
+}
+
+#[tauri::command]
+async fn fetch_youtube(url: String) -> Result<AudioImportCandidate, String> {
+    tauri::async_runtime::spawn_blocking(move || perform_fetch_youtube(&url))
+        .await
+        .map_err(|e| format!("YouTube worker task failed: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1264,7 +1468,8 @@ pub fn run() {
             write_playlist_file,
             write_workspace_playlist,
             read_asset_file,
-            write_asset_file
+            write_asset_file,
+            fetch_youtube
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
